@@ -1,13 +1,16 @@
 import torch
 import random
 import numpy as np
+import os
 from collections import deque
 from game import SnakeGameAI, Direction, Point
 from model import Linear_QNet, QTrainer
 from helper import plot
+import matplotlib.pyplot as plt
 
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 MAX_MEMORY = 100_000
-BATCH_SIZE = 1000
+BATCH_SIZE = 10000
 LR = 0.001
 
 class Agent:
@@ -92,7 +95,8 @@ class Agent:
             move = random.randint(0, 2)
             final_move[move] = 1
         else:
-            state0 = torch.tensor(state, dtype=torch.float)
+            state0 = torch.tensor(np.array(state), dtype=torch.float)
+
             with torch.no_grad():
                 prediction = self.model(state0)
             move = torch.argmax(prediction).item()
@@ -108,40 +112,84 @@ def train():
     record = 0
     agent = Agent()
     game = SnakeGameAI()
-    while True:
-        # get old state
-        state_old = agent.get_state(game)
+    
+    # Ensure the directory for saving plots exists
+    if not os.path.exists('plots'):
+        os.makedirs('plots')
+    
+    # Initialize the plot
+    plt.figure()
+    plt.ion()  # Turn on interactive mode for live updates
+    plot_scores_line, = plt.plot(plot_scores, label='Scores')
+    plot_mean_scores_line, = plt.plot(plot_mean_scores, label='Mean Scores')
+    plt.xlabel('Games')
+    plt.ylabel('Scores')
+    plt.title('Game Scores and Mean Scores')
+    plt.legend()
+    
+    # Open a file for logging
+    with open('game_scores.txt', 'a') as log_file:
+        while True:
+            # get old state
+            state_old = agent.get_state(game)
 
-        # get move
-        final_move = agent.get_action(state_old)
+            # get move
+            final_move = agent.get_action(state_old)
 
-        # perform move and get new state
-        reward, done, score = game.play_step(final_move)
-        state_new = agent.get_state(game)
+            # perform move and get new state
+            reward, done, score = game.play_step(final_move)
+            state_new = agent.get_state(game)
 
-        # train short memory
-        agent.train_short_memory(state_old, final_move, reward, state_new, done)
+            # train short memory
+            agent.train_short_memory(state_old, final_move, reward, state_new, done)
 
-        # remember
-        agent.remember(state_old, final_move, reward, state_new, done)
+            # remember
+            agent.remember(state_old, final_move, reward, state_new, done)
 
-        if done:
-            # train long memory, plot result
-            game.reset()
-            agent.n_games += 1
-            agent.train_long_memory()
+            if done:
+                # train long memory, plot result
+                game.reset()
+                agent.n_games += 1
+                agent.train_long_memory()
 
-            if score > record:
-                record = score
-                agent.model.save()
+                if score > record:
+                    record = score
+                    agent.model.save()
 
-            print('Game', agent.n_games, 'Score', score, 'Record:', record)
+                # Log the game score and record to a file
+                log_file.write(f'Game {agent.n_games}, Score {score}, Record {record}\n')
+                log_file.flush()  # Ensure the log is written to the file immediately
 
-            plot_scores.append(score)
-            total_score += score
-            mean_score = total_score / agent.n_games
-            plot_mean_scores.append(mean_score)
-            plot(plot_scores, plot_mean_scores)
+                print('Game', agent.n_games, 'Score', score, 'Record:', record)
+
+                # Update the plot data
+                plot_scores.append(score)
+                total_score += score
+                mean_score = total_score / agent.n_games
+                plot_mean_scores.append(mean_score)
+
+                # Update the plot lines
+                plot_scores_line.set_ydata(plot_scores)
+                plot_mean_scores_line.set_ydata(plot_mean_scores)
+                plot_scores_line.set_xdata(range(len(plot_scores)))
+                plot_mean_scores_line.set_xdata(range(len(plot_mean_scores)))
+
+                # Adjust the plot limits
+                plt.ylim(0, max(plot_scores + [mean_score], default=1))
+                plt.xlim(0, len(plot_scores))
+
+                # Draw and save the plot every 5 games
+                if agent.n_games % 5 == 0:
+                    plt.savefig(f'plots/plot_{agent.n_games}.png')
+                
+                plt.draw()
+                plt.pause(0.1)  # Pause to allow the plot to update
+
+    # Save the final plot when training ends
+    plt.ioff()  # Turn off interactive mode
+    plt.savefig(f'plots/plot_{agent.n_games}.png')
+    plt.close()
+
 
 
 if __name__ == '__main__':
