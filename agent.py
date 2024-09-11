@@ -5,7 +5,7 @@ import os
 from collections import deque
 from game import SnakeGameAI, Direction, Point
 from model import Linear_QNet, QTrainer
-from helper import plot
+#from helper import plot
 import matplotlib.pyplot as plt
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
@@ -15,14 +15,13 @@ LR = 0.001
 
 class Agent:
 
-    def __init__(self):
+    def __init__(self, optimizer_name='adam'):
         self.n_games = 0
-        self.epsilon = 0 # randomness
-        self.gamma = 0.9 # discount rate
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        self.epsilon = 0  # randomness
+        self.gamma = 0.9  # discount rate
+        self.memory = deque(maxlen=MAX_MEMORY)  # popleft() if memory is full
         self.model = Linear_QNet(11, 256, 3)
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
-
+        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma, optimizer_name=optimizer_name)  # Pass optimizer_name here
 
     def get_state(self, game):
         head = game.snake[0]
@@ -105,92 +104,95 @@ class Agent:
         return final_move
 
 
-def train():
-    plot_scores = []
-    plot_mean_scores = []
-    total_score = 0
-    record = 0
-    agent = Agent()
-    game = SnakeGameAI()
+def train(optimizers=['adam']):
+    plot_scores_dict = {opt: [] for opt in optimizers}
+    plot_mean_scores_dict = {opt: [] for opt in optimizers}
+    plot_record_scores_dict = {opt: [] for opt in optimizers}  # New list to store record values
+    total_score_dict = {opt: 0 for opt in optimizers}
+    record_dict = {opt: 0 for opt in optimizers}
     
     # Ensure the directory for saving plots exists
     if not os.path.exists('plots'):
         os.makedirs('plots')
     
-    # Initialize the plot
-    plt.figure()
-    plt.ion()  # Turn on interactive mode for live updates
-    plot_scores_line, = plt.plot(plot_scores, label='Scores')
-    plot_mean_scores_line, = plt.plot(plot_mean_scores, label='Mean Scores')
-    plt.xlabel('Games')
-    plt.ylabel('Scores')
-    plt.title('Game Scores and Mean Scores')
-    plt.legend()
+    for opt_name in optimizers:
+        agent = Agent(optimizer_name=opt_name)
+        game = SnakeGameAI()
+        total_score = 0
+        
+        plt.figure()
+        plt.ion()  # Turn on interactive mode for live updates
+        plot_scores_line, = plt.plot(plot_scores_dict[opt_name], label=f'Scores ({opt_name})')
+        plot_mean_scores_line, = plt.plot(plot_mean_scores_dict[opt_name], label=f'Mean Scores ({opt_name})')
+        plot_record_scores_line, = plt.plot(plot_record_scores_dict[opt_name], label=f'Record ({opt_name})', linestyle='--')  # New line for the record
+        plt.xlabel('Games')
+        plt.ylabel('Scores')
+        plt.title(f'Performance with {opt_name} optimizer')
+        plt.legend()
     
-    # Open a file for logging
-    with open('game_scores.txt', 'a') as log_file:
-        while True:
-            # get old state
-            state_old = agent.get_state(game)
+        with open(f'game_scores_{opt_name}.txt', 'a') as log_file:
+            while True:
+                # get old state
+                state_old = agent.get_state(game)
 
-            # get move
-            final_move = agent.get_action(state_old)
+                # get move
+                final_move = agent.get_action(state_old)
 
-            # perform move and get new state
-            reward, done, score = game.play_step(final_move)
-            state_new = agent.get_state(game)
+                # perform move and get new state
+                reward, done, score = game.play_step(final_move)
+                state_new = agent.get_state(game)
 
-            # train short memory
-            agent.train_short_memory(state_old, final_move, reward, state_new, done)
+                # train short memory
+                agent.train_short_memory(state_old, final_move, reward, state_new, done)
 
-            # remember
-            agent.remember(state_old, final_move, reward, state_new, done)
+                # remember
+                agent.remember(state_old, final_move, reward, state_new, done)
 
-            if done:
-                # train long memory, plot result
-                game.reset()
-                agent.n_games += 1
-                agent.train_long_memory()
+                if done:
+                    # train long memory, plot result
+                    game.reset()
+                    agent.n_games += 1
+                    agent.train_long_memory()
 
-                if score > record:
-                    record = score
-                    agent.model.save()
+                    if score > record_dict[opt_name]:
+                        record_dict[opt_name] = score
+                        agent.model.save(file_name=f'model_{opt_name}.pth')
 
-                # Log the game score and record to a file
-                log_file.write(f'Game {agent.n_games}, Score {score}, Record {record}\n')
-                log_file.flush()  # Ensure the log is written to the file immediately
+                    # Log the game score and record to a file
+                    log_file.write(f'Game {agent.n_games}, Score {score}, Record {record_dict[opt_name]}\n')
+                    log_file.flush()
 
-                print('Game', agent.n_games, 'Score', score, 'Record:', record)
+                    print(f'Optimizer: {opt_name}, Game {agent.n_games}, Score {score}, Record: {record_dict[opt_name]}')
 
-                # Update the plot data
-                plot_scores.append(score)
-                total_score += score
-                mean_score = total_score / agent.n_games
-                plot_mean_scores.append(mean_score)
+                    # Update the plot data
+                    plot_scores_dict[opt_name].append(score)
+                    total_score_dict[opt_name] += score
+                    mean_score = total_score_dict[opt_name] / agent.n_games
+                    plot_mean_scores_dict[opt_name].append(mean_score)
+                    plot_record_scores_dict[opt_name].append(record_dict[opt_name])  # Append the new record value
 
-                # Update the plot lines
-                plot_scores_line.set_ydata(plot_scores)
-                plot_mean_scores_line.set_ydata(plot_mean_scores)
-                plot_scores_line.set_xdata(range(len(plot_scores)))
-                plot_mean_scores_line.set_xdata(range(len(plot_mean_scores)))
+                    # Update the plot lines
+                    plot_scores_line.set_ydata(plot_scores_dict[opt_name])
+                    plot_mean_scores_line.set_ydata(plot_mean_scores_dict[opt_name])
+                    plot_record_scores_line.set_ydata(plot_record_scores_dict[opt_name])  # Update record plot
+                    plot_scores_line.set_xdata(range(len(plot_scores_dict[opt_name])))
+                    plot_mean_scores_line.set_xdata(range(len(plot_mean_scores_dict[opt_name])))
+                    plot_record_scores_line.set_xdata(range(len(plot_record_scores_dict[opt_name])))  # Update record X-axis
 
-                # Adjust the plot limits
-                plt.ylim(0, max(plot_scores + [mean_score], default=1))
-                plt.xlim(0, len(plot_scores))
+                    # Adjust the plot limits
+                    plt.ylim(0, max(plot_scores_dict[opt_name] + [mean_score] + [record_dict[opt_name]], default=1))  # Adjust for record
+                    plt.xlim(0, len(plot_scores_dict[opt_name]))
 
-                # Draw and save the plot every 5 games
-                if agent.n_games % 5 == 0:
-                    plt.savefig(f'plots/plot_{agent.n_games}.png')
-                
-                plt.draw()
-                plt.pause(0.1)  # Pause to allow the plot to update
+                    # Draw and save the plot every 5 games
+                    if agent.n_games % 100 == 0:
+                        plt.savefig(f'plots/plot_{opt_name}_{agent.n_games}.png')
 
-    # Save the final plot when training ends
-    plt.ioff()  # Turn off interactive mode
-    plt.savefig(f'plots/plot_{agent.n_games}.png')
-    plt.close()
-
-
+                    plt.draw()
+                    plt.pause(0.1)  # Pause to allow the plot to update
+                    
+                # Optional stopping condition for demo purposes
+                if agent.n_games >= 300: 
+                    break
 
 if __name__ == '__main__':
     train()
