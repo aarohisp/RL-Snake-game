@@ -25,11 +25,21 @@ class Linear_QNet(nn.Module):
 
 
 class QTrainer:
-    def __init__(self, model, lr, gamma):
+    def __init__(self, model, lr, gamma, optimizer_name='adam'):
         self.lr = lr
         self.gamma = gamma
         self.model = model
-        self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        
+        if optimizer_name == 'adam':
+            self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        elif optimizer_name == 'rmsprop':
+            self.optimizer = optim.RMSprop(model.parameters(), lr=self.lr)
+        elif optimizer_name == 'adadelta':
+            self.optimizer = optim.Adadelta(model.parameters(), lr=self.lr)
+        elif optimizer_name == 'nesterov':
+            self.optimizer = optim.SGD(model.parameters(), lr=self.lr, momentum=0.9, nesterov=True)
+        else:
+            raise ValueError("Unknown optimizer. Choose from 'adam', 'rmsprop', 'adadelta', 'nesterov'.")
         self.criterion = nn.MSELoss()
 
     def train_step(self, state, action, reward, next_state, done):
